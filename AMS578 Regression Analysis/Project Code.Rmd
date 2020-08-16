@@ -1,0 +1,469 @@
+---
+title: "578Project"
+author: "Shengnan You"
+date: "4/22/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(max.print=1000)
+```
+
+```{r data}
+E <- read.csv("E_1646.csv",header = TRUE)
+Y <- read.csv("Y_1646.csv",header = TRUE)
+G <- read.csv("G_1646.csv",header = TRUE)
+data <- data.frame(cbind(Y, E, G))
+str(data)
+library(leaps)
+library('dplyr')
+library('caret')
+library(mice)
+library(broom)
+library(knitr)
+```
+
+```{r Summary}
+
+my.sum<- function(l){
+  l <- as.vector(unlist(as.numeric(l)))
+  l <- na.omit(l)
+  min <- min(l)
+  max <- max(l)
+  sd<- sd(l)
+  q <- as.vector(quantile(l))
+  l <- q[2]
+  u <- q[4]
+  
+  return (list(min=min,max=max,sd=sd,lo=l,up=u))
+}
+
+    name <- c()
+    minimum <- c()
+    maximum <- c()
+    s.d<- c()
+    lowerq <- c()
+    upperq <- c()
+    
+for(i in 1:7){
+  i <- as.numeric(i)
+  if(i==1){
+    result <- my.sum(data$Y)
+    var <- 'Y'
+  }
+  else {
+    result <-my.sum(data[,paste0('E',as.character(i-1))])
+    var <- paste0('E',as.character(i-1))
+  }
+
+  lowerq <- c(lowerq,result$lo)
+  upperq <- c(upperq,result$up)
+  name<- c(name,var)
+  minimum <- c(minimum,result$min)
+  maximum <- c(maximum,result$max)
+  s.d <- c(s.d,result$sd)
+
+}
+
+maximum
+df <- c(name,minimum,maximum,sd,lowerq,upperq)
+
+sumstats <- data.frame(Name = name,
+                Min = minimum,
+                Max = maximum,
+                StandarDeviation = s.d,
+                lower = lowerq,
+                upper = upperq)
+
+
+sumstats
+
+
+# Chkeck structure of the data
+str(data)
+
+```
+
+
+```{r data processing}
+
+data <- data %>%
+  mutate(
+    G1= as.factor(G1),
+    G2 = as.factor(G2),
+    G3 = as.factor(G3),
+    G4 = as.factor(G4),
+    G5 = as.factor(G5),
+    G6 = as.factor(G6),
+    G7 = as.factor(G7),
+    G8 = as.factor(G8),
+    G9 = as.factor(G9), 
+    G10 = as.factor(G10),
+    G11= as.factor(G11),
+    G12 = as.factor(G12),
+    G13 = as.factor(G13),
+    G14 = as.factor(G14),
+    G15 = as.factor(G15),
+    G16 = as.factor(G16),
+    G17 = as.factor(G17),
+    G18 = as.factor(G18),
+    G19 = as.factor(G19), 
+    G20 = as.factor(G20),
+  )
+names(data) <- c('Y', paste0('E', 1:6), paste0('G', 1:20))
+summary(data)
+```
+
+```{r missing data}
+imdata <- mice(data, print=FALSE)
+meth <- imdata$meth
+for(i in 1:20){meth[paste0("G",i)] <- "logreg" }
+imData <- mice(data, maxit = 3, print=FALSE,method=meth)
+complete <- complete(imData)
+md.pattern(complete)
+```
+
+```{r main effetcts}
+# To test if there is any relationship between the outcome and the predictors, we start with fitting a multiple linear regression model using all the predictors
+full.model <- lm(Y ~., data = complete)
+main <- summary (full.model)
+main
+
+full.model2 <- lm(Y~(.)^2,data=complete)
+main2 <- summary (full.model2)
+main2
+
+full.model3 <- lm(Y~(.)^3,data=complete)
+main3 <- summary (full.model3)
+main3
+# High F value and low p value indicates some relationship between the predictors and the outcome.
+library(knitr)
+kable(main$coefficients[ abs(main$coefficients[,4]) <= 0.001, ], caption='Sig Coefficients')
+'''
+Estimate	Std. Error	t value	Pr(>|t|)
+(Intercept)	6.9086546	0.6794215	10.168438	0.0000000
+E3	0.1030530	0.0056232	18.326529	0.0000000
+G21	0.1618136	0.0140559	11.512143	0.0000000
+G91	0.0508265	0.0137938	3.684742	0.0002416
+G191	-0.1060708	0.0137240	-7.728833	0.0000000
+'''
+kable(main2$coefficients[ abs(main2$coefficients[,4]) <= 0.01, ], caption='Sig Coefficients')
+'''
+Estimate	Std. Error	t value	Pr(>|t|)
+E6:G51	0.0491017	0.0167863	2.925107	0.0035638
+E6:G121	0.0507119	0.0194488	2.607463	0.0093316
+G21:G31	0.1450048	0.0526948	2.751785	0.0060929
+G41:G131	-0.1414429	0.0460995	-3.068208	0.0022433
+'''
+
+
+plot(full.model)
+# plots show some model deficiencies
+# Residual vs  plots: indicate that the variance of the errors could be  non-constant.To deal with inequality of variance is to apply transformation
+install.packages('lmtest')
+lmtest::bptest(full.model1) 
+# p-value = 0.3967
+# Breusch-Pagan test: very low p-value means there is a possibility of a non-constant variance. Here we cannot reject the null hypothesis of constant variance of errors.
+# Normal Q-Q plot: Our pattern looks like associated with positive skew. However, here we only have small deviance which does not affect our models greatly
+# Based on the check of plots, the linear relationship assumptions seems reasonable
+# Moerever, if we look at the p-values of the estimated coefficients above, we see that not all the coefficients are statistically significant. This means that only some predictors are related to y, we need to perform some variable selection. Significant independent variables (E3,G2,G9,G19) are picked out for further analysis. 
+```
+Variables that are significant at level 0.05/26 = 0.002 are E3,G2,G9,G19. G18 is significant at level 0.01.
+Adjusted R-squared:  0.353
+
+
+```{r variable selection with no interaction terms}
+# Then we use variable selection method to check whether we could exclude any regressor. One reason for this is that the variance of the predicted y will increase and the precision of the parameter estimates will decrease as the number of regressors increases. 
+# We will use leaps package to perform all-possible-regressions approach to pick our best models invoving interaction terms
+# regsubsets can be used to identify different best models of different size. Here I choose to use backward selection since the number of samples larger than the number of variables, so that the full model can be fit.
+#Maximum number of vairables is six and 1 best set for each set of variables.
+fit1.back <- regsubsets(Y~., data = complete, nvmax = 26,nbest = 1,method = "backward", really.big = T)
+fit1.step<- regsubsets(Y~., data = complete, nvmax = 26,nbest = 1,method = "seqrep", really.big = T)
+fit1.forward<- regsubsets(Y~., data = complete, nvmax = 26,nbest = 1,method = "forward", really.big = T)
+# summary function returns some metrics allowing us to identify the best overall mode
+#The best model, according to chosen metrics, can be extracted as follow:
+fit1.back.sum <- summary(fit1.back)
+fit1.back.sum 
+fit1.step.sum <- summary(fit1.step.reg)
+fit1.step.sum 
+fit1.forward.sum<-summary(fit1.forward)
+fit1.forward.sum
+which.min(fit1.back.sum$bic)
+#4
+which.max(fit1.back.sum$adjr2)
+#13
+which.min(fit1.step.sum$bic)
+#4
+which.max(fit1.step.sum$adjr2)
+#13
+which.min(fit1.forward.sum$bic)
+#4
+which.max(fit1.forward.sum$adjr2)
+#13
+# two stepwise-type regression seems to reach an agreement
+# model.m1 is the model using highest adjusted R squared
+model.m1 <- lm(Y~E3+E5+G2+G3+G4+G6+G8+G9+G11+G14+G18+G19+G20,data= complete)
+# model.m2 is the model with lowest BIC 
+model.m2 <- lm(Y~E3+G2+G9+G19,data=complete)
+summary(model.m1)
+summary(model.m2)
+glance(model.m1)
+glance(model.m2)
+#model.m1:BIC: -489.3244	
+#model.m2:BIC: -577.9482	
+#model.m3:BIC: -610.1739
+anova(model.m1,model.m2)
+#p-value:0.002652 *, which means that the third model is slightly better than the previous one
+# vif in car package can be used to check multicolinearty
+car::vif(model.m1)
+car::vif(model.m2)
+#Our predictors do not have a prblematic VIF. Hence, no multicolinearty when we do not add interactions terms.
+```
+
+```{r interaction 2nd}
+set.seed(123)
+#After I have picked out my candidate variables, now I consider possible interactions between them. I will use regsubsets in leaps package which has implementation of stepwise-type regression 
+# We have 26 E and G variables and 325(26 choose 2) interactions terms. It is not feasible to examine all 2^(26+325) regression models.
+
+# Instead we look for use stepwise selection techniques to obtain the largest model such that we can examine all possible regressions.
+
+# If I use 13 regressors as my selected variables, then I will have 2^(13+78=91)=2.4758801e+27,which is a big number and will cause R to report linear dependency errors.
+# The fisrt step is to eliminate variables that have negligible effects.
+inter <- lm(Y~(E3+E5+G2+G3+G4+G6+G8+G9+G11+G14+G18+G19+G20)^2, data = complete)
+temp <- summary(inter)
+kable(temp$coefficients[ abs(temp$coefficients[,4]) <= 0.1, ], caption='Sig Coefficients')
+# Doing the hypothesis test gives me significant candidates with p-value<0.01. Addtionally, these variables all have p-values <0.15 in main effects model
+# '''
+# Estimate	Std. Error	t value	Pr(>|t|)
+# G111	-1.9415357	1.0448413	-1.858211	0.0634625
+# E3:G201	0.0400607	0.0161447	2.481348	0.0132687
+# E5:G91	-0.0264714	0.0148639	-1.780912	0.0752611
+# E5:G111	0.0285989	0.0157792	1.812444	0.0702478
+# G21:G31	0.1152963	0.0411887	2.799222	0.0052312
+# G21:G81	-0.0786713	0.0377589	-2.083518	0.0374832
+# G21:G181	-0.0790241	0.0362190	-2.181839	0.0293772
+# G21:G201	0.0666326	0.0389136	1.712321	0.0871790
+# G31:G191	0.0623798	0.0352206	1.771114	0.0768771
+# G81:G111	-0.0756788	0.0405280	-1.867322	0.0621786
+# G91:G191	-0.0947369	0.0361757	-2.618801	0.0089710
+# '''
+#Use variables in model.m1 and delete G4,G6,G14 since they do not appear in our interaction terms.
+num <- 2^(55)
+fit2.seq <- regsubsets(Y~(E3+E5+G2+G3+G8+G9+G18+G11+G19+G20)^2, data = complete, nvmax=num,nbest = 1,method = "seqrep", really.big = T)
+fit2.forward <- regsubsets(Y~(E3+E5+G2+G3+G8+G9+G18+G11+G19+G20)^2, data = complete,nvmax=num, nbest = 1,method = "forward", really.big = T)
+fit2.back <- regsubsets(Y~(E3+E5+G2+G3+G8+G9+G18+G11+G19+G20)^2, data = complete, nvmax=num, nbest = 1,method = "backward", really.big = T)
+fit2.seq.sum <- summary(fit2.seq)
+fit2.seq.sum
+fit2.forward.sum <- summary(fit2.forward)
+fit2.forward.sum
+fit2.back.sum <- summary(fit2.back)
+fit2.back.sum
+which.min(fit2.seq.sum$bic)
+#9
+which.max(fit2.seq.sum$adjr2)
+#25
+which.min(fit2.forward.sum$bic)
+#5 E3+E3:G2+E5:G19+G2:G18+G9:G20
+which.max(fit2.forward.sum$adjr2)
+#26 
+which.min(fit2.back.sum$bic)
+#5 E3+G2+E3:G9+G2:G18+G9:G19
+which.max(fit2.back.sum$adjr2)
+#29
+# Using smallest BIC as metrics, backwards and sequential stepwise regression gives simplified models. Using adjusted r squared,we cannot simplify our model. 
+# Result: I choose E3+G2+E3:G9+G2:G18+G9:G19 as my candidate models because all its terms appear significant in the main effects models and models including interactions.
+
+# If I use fewer variables which selected with lowedt BIC. I will have 2^10=1024 regressors.
+fit3.forward <- regsubsets(Y~(E3+G2+G9+G19)^2, data = complete, nvmax = 1024,nbest = 1,method = "forward", really.big = T)
+fit3.seq <- regsubsets(Y~(E3+G2+G9+G19)^2, data = complete, nvmax = 1024,nbest = 1,method = "seqrep", really.big = T)
+fit3.back <- regsubsets(Y~(E3+G2+G9+G19)^2, data = complete, nvmax = 1024,nbest = 1,method = "backward", really.big = T)
+
+fit3.forward.sum <- summary(fit3.forward)
+fit3.back.sum <- summary(fit3.back)
+fit3.seq.sum <- summary(fit3.seq)
+fit3.forward.sum
+fit3.back.sum
+fit3.seq.sum
+which.min(fit3.forward.sum$bic)
+#5: E3+G19+E3:G2+E3:G9+G9:G19
+which.max(fit3.forward.sum$adjr2)
+#5: E3+G19+E3:G2+E3:G9+G9:G19
+which.min(fit3.seq.sum$bic)
+#4 E3+E3:G2+E3:G9+G9:G19
+which.max(fit3.seq.sum$adjr2)
+#4 E3+E3:G2+E3:G9+G9:G19
+which.min(fit3.back.sum$bic)
+#4 E3+E3:G2+E3:G9+G9:G19
+which.max(fit3.back.sum$adjr2)
+#4 E3+E3:G2+E3:G9+G9:G19
+#Result : E3+E3:G2+E3:G9+G9:G19 is my second candidate model
+
+#candidate models for second terms
+# Here I choose t use non-hierachical model because (1)they are not statistical significant (2) Our situation involves some categorical variables in the interaction. 
+model.m3 <- lm(Y~E3+E3:G2+E3:G9+G9:G19,data=complete)
+model.m4 <- lm(Y~E3+G2+E3:G9+G2:G18+G9:G19,data = complete)
+
+# compare m3 and m4, we find that m4 includes G18 and G2:G18 while m4 considers E3:G2
+summary(model.m3)
+summary(model.m4)
+glance(model.m3)
+glance(model.m4)
+car::vif(model.m3)
+car::vif(model.m4)
+anova(model.m3,model.m4)
+#model.m4 is significant different from model.m4
+
+```
+
+
+```{r interaction 3rd}
+fit4.forward <- regsubsets(Y~(E3+G2+G9+G19)^3, data = complete, nvmax = 1000,nbest = 1,method = "forward", really.big = T)
+fit4.seq <- regsubsets(Y~(E3+G2+G9+G19)^3, data = complete, nvmax = 1000,nbest = 1,method = "seqrep", really.big = T)
+fit4.back <- regsubsets(Y~(E3+G2+G9+G19)^3, data = complete, nvmax = 1000,nbest = 1,method = "backward", really.big = T)
+
+fit4.forward.sum <- summary(fit4.forward)
+fit4.back.sum <- summary(fit4.back)
+fit4.seq.sum <- summary(fit4.seq)
+fit4.forward.sum
+fit4.back.sum
+fit4.seq.sum
+which.min(fit4.forward.sum$bic)
+#5 E3+G19+E3:G2+E3:G9+G9:G19
+which.max(fit4.forward.sum$adjr2)
+#5 E3+G19+E3:G2+E3:G9+G9:G19
+which.min(fit4.seq.sum$bic)
+#4 E3+E3:G2+E3:G9+G9:G19
+which.max(fit4.seq.sum$adjr2)
+#4 E3+E3:G2+E3:G9+G9:G19
+which.min(fit4.back.sum$bic)
+#4 E3+G2+G9+G9:G19
+which.max(fit4.back.sum$adjr2)
+#5 E3+G2+G9+G9:G19+E3:G9
+# Using forward and stepwise regression we get the same results obtained in the seconde interactions
+temp1 <- lm(Y~E3+G2+G9+G9:G19,data = complete)
+temp2 <- lm(Y~E3+G2+G9+G9:G19+E3:G9,data = complete)
+summary(temp1)
+summary(temp2)
+glance(temp1)
+glance(temp2)
+car::vif(temp1)
+car::vif(temp2)
+# temp1 has bigger F statistics, more significant coefficent value, and temp2 has bigger GVIF. I choose temp2 as my candidate model
+model.m5 <- temp1
+```
+
+
+```{r model comparisions and validation}
+modl.m1 <-lm(Y~E3+E5+G2+G3+G4+G6+G8+G9+G11+G14+G18+G19+G20,data= complete)
+model.m2<-lm(Y~E3   +G2                     +G9+G19,data=complete)
+model.m3<-lm(Y~E3                     +E3:G9+G9:G19+E3:G2,data=complete)
+model.m4<-lm(Y~E3   +G2               +E3:G9+G9:G19+G2:G18,data = complete)
+model.m5<-lm(Y~E3   +G2            +G9+E3:G9+G9:G19,data = complete)
+library(leaps)
+subset <- regsubsets(Y~(E3+G2+G9+G18+G19+G20)^2,nbest=5,data = complete,really.big = T,method='exhaustive')
+which.min(summary(subset)$bic)
+#16
+which.max(summary(subset)$adjr2)
+#36
+which.min(summary(subset)$cp)
+#31
+which.max(summary(subset)$rss)
+#5
+coef(subset,16)
+```
+ (Intercept)           E3       E3:G21       E3:G91     G91:G191 
+ 6.578081212  0.096715149  0.003115101  0.002884109 -0.120906449 
+library(car)
+
+adj.r.squared	  AIC     BIC	 statistic
+0.3675324	-647.1935	-573.5772	0
+0.3570187	-639.6205	-610.1739	0
+0.3628622	-647.7557	-613.4014	0
+0.3667869	-651.9487	-607.7789	0
+0.3624244	-646.0754	-606.8133	0
+
+We can see that model 4 has a relatively satisfactory performance. It has the lowest  AIC, a low p-value and its adjusted R squared is almost no different than the highest.
+Result: The third model is my final model
+
+#Big picture: What regressors seem important?
+#E3,G2,E3:G9,G9:G19
+
+```{r}
+glance(model.m1)
+x <- glance(model.m4)%>%
+  dplyr::select(adj.r.squared,AIC,BIC,p.value)
+kable(x)
+```
+
+```{r Assumptions}
+#So far we have assumed that there is a linear relationship between the predictors and y. If the  relationship is quite far from linear, then it may yield an unstable model
+library(broom)
+# fitted values, residuals and several metrics useful for regression diagnostics.
+model.diag.metrics <- augment(model.m4) 
+head(model.diag.metrics)
+plot(model.m4, 1)
+#Residuals vs Fitted.The residuals can be contained in a horizontal band and no obvious pattern in plots. This suggests that we can assume linear relationship between the predictors and the outcome variables.We can also see from the plots some potential outliers(#786,#478,#914).
+
+plot(model.m4, 2)
+#Small deviance from the normality assumption do not affect the model greatly, so we can assume normality.
+
+plot(model.m4, 3)
+# Homogeneity of variance: scale-location plot. We can see a horizontal line with equally spread point,suggesting no heteroscadacity problem, It also implys no need for a transformation on regressors or higher order terms .
+
+plot(model.m4, 5)
+# Residuals vs Leverage plot: 
+
+plot(model.m4, 4)
+# We use Cook’s distance to check the influence of a value. This metric considers both leverage and residual size. These poins did not exceed 1. We consider leave it in our model for further analysis. The plot above highlights the top 3 most extreme points (#457, #943 and #539).
+
+```
+```{r Diagnostics}
+
+Diagnostics <- data.frame(Id = 1:1000, cd = cooks.distance(model.m4), lev = hatvalues(model.m4), r = rstudent(model.m4),
+dffit = dffits(model.m4),dfbeta = dfbeta(model.m4))
+#outliers
+print(subset(Diagnostics, abs(r)>=2))
+#high-leverage points
+print(subset(Diagnostics, lev > 10/1000))
+#influential points:
+print(subset(Diagnostics, cd > 1 |abs(dffit)> 2*sqrt(6/1000)))
+model.diag.metrics %>%
+  top_n(5, wt = .cooksd)
+#We cannot know if there is an error in measurement , we have no justification for their removal.
+#Alternatively, we could use robust estimation techniques essentially downweight observations to deal with influential points
+
+#multicolinearty
+print(car::vif(model.m4))
+#All GVIF values are moderate. They may have some multicolineary due to the including of interaction terms.
+#Generalized collinearity diagnostics GVIF = VIF when degree= 1
+#A widely used approach to deal with is to eliminate variables(E3:G9) However, our regressors may have significant explanatory power to prediction. We could also use penalized regression to fix the problem
+```
+
+```{r Model Interpretation}
+summary(model.m4)
+confint(model.m4)
+library(alr3)
+library(lmtest)
+anova(model.m4,full.model2)
+lrtest(model.m4,full.model2)
+# p-value is non-significant: Full model with all interaction terms actually does not provide a significantly better fit to the data. Thus, model.m3 provides a reasonable enough fit to the data.
+# lack of fit test
+pureErrorAnova(model.m4)
+# The lack-of-fit test statistic is F =  5.2628. The P value is not small, we cannot reject the hypothesis that the model adequately describes the data. 
+```
+
+
+Big picture:
+
+What regressors seem important?
+E3,G2,E3:G9,G9:G19,G2:G18
+
+Which equations appear most reasonable? Do the regressors in the best model
+make sense in light of the problem environment
+
+Are the regression coefficients reasonable? In particular, are the signs and magnitudes of the coeffi cients realistic and the standard errors relativelysmall?
+
+
